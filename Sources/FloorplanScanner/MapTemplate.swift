@@ -45,7 +45,7 @@ let mapTemplate = #"""
 </style></head>
 <body>
 <main><h1>swift-floorplan</h1><div class="sub" id="sub"></div>
-  <div class="bar"><input id="q" placeholder="Filter by file, folder, feature or type name"><select id="mode"><option value="folder">Group by folder</option><option value="feature">Group by feature</option><option value="tree">Reducer tree</option></select></div><div id="rooms"></div></main>
+  <div class="bar"><input id="q" placeholder="Filter by file, folder, feature or type name"><select id="mode"><option value="folder">Group by folder</option><option value="feature">Group by feature</option><option value="tree">Reducer tree</option><option value="deps">Dependencies</option></select></div><div id="rooms"></div></main>
 <aside id="side"><div class="sub">Click a file card. Green = files it uses. Blue = files that use it.</div></aside>
 <script>
 const DATA = __SCAN_DATA__;
@@ -82,6 +82,7 @@ modeEl.onchange = () => draw(modeEl.value);
 // Group the files into titled sections: by folder, or by feature when a features file was given.
 function draw(mode) {
   if (mode === "tree") return drawTree();
+  if (mode === "deps") return drawDeps();
   const groups = new Map();
   for (const f of files) {
     const key = mode === "feature" ? (FEATURE_OF[f.path] ?? UNASSIGNED) : roomOf(f.path);
@@ -186,6 +187,67 @@ function filterTree(q) {
   for (const card of document.querySelectorAll(".rootcard")) card.classList.toggle("hide", !hit(byName.get(card.dataset.name)));
   for (const t of document.querySelectorAll(".tile")) t.classList.toggle("hit", !!q && reducerText(byName.get(t.dataset.name)).includes(q));
 }
+// Dependencies view. A dependency is a key read with @Dependency(\.key). Keys declared in the scan show their
+// type and the frameworks their file imports (EventKit, CoreData...), so "what touches the database" is one filter away.
+const BORING = new Set(["ComposableArchitecture", "Dependencies", "Foundation", "SwiftUI", "DesignSystem", "AppKit", "UIKit"]);
+// ponytail: a type name starting with EK/CK/UN plus a capital (EKEventStore) shows its framework even when the file
+// forgot the import. Three prefixes only; add more when a real app needs them.
+const PREFIX_FRAMEWORK = { EK: "EventKit", CK: "CloudKit", UN: "UserNotifications" };
+const depUsers = new Map(), depDecl = new Map();
+for (const f of files) {
+  for (const d of f.dependencyKeys ?? []) depDecl.set(d.name, { type: d.type, path: f.path });
+  for (const t of f.types) for (const k of t.dependencies ?? []) {
+    if (!depUsers.has(k)) depUsers.set(k, []);
+    depUsers.get(k).push({ name: t.name, path: f.path });
+  }
+}
+if (!depUsers.size) modeEl.querySelector("[value=deps]").remove();
+// Frameworks of a dependency: imports of the file that declares it, the file that defines its type, and the files of
+// types named after it (LiveReminderClient for ReminderClient), plus framework names seen in those types.
+function frameworksOf(d) {
+  const named = files.flatMap(f => f.types.filter(t => t.name.split(".")[0].includes(d.type) && !/Tests?$/.test(t.name)).map(t => ({ path: f.path, t })));
+  const paths = new Set([d.path, ...(definers.get(d.type) ?? []), ...named.map(n => n.path)]);
+  const kits = new Set(files.filter(f => paths.has(f.path)).flatMap(f => f.imports).filter(m => !BORING.has(m)));
+  for (const { t } of named) for (const r of t.references) if (PREFIX_FRAMEWORK[r.slice(0, 2)] && /[A-Z]/.test(r[2] ?? "")) kits.add(PREFIX_FRAMEWORK[r.slice(0, 2)]);
+  return [...kits].sort();
+}
+function depCard(key) {
+  const users = depUsers.get(key), d = depDecl.get(key), kits = d ? frameworksOf(d) : [];
+  const card = mk("div", "tile depcard", `<div class="top">${esc(key)}</div><div class="foot"><span>${esc(d ? d.type : "from a library")}</span><span class="more">${users.length} ›</span></div><div class="file">${esc(d ? kits.join(" · ") || "no framework" : "")}</div>`);
+  card.dataset.text = [key, d?.type, ...kits, ...users.map(u => u.name)].join(" ").toLowerCase();
+  card.onclick = () => {
+    const next = card.nextElementSibling;
+    if (next?.classList.contains("subcoll")) { next.remove(); card.classList.remove("open"); return; }
+    card.classList.add("open");
+    const sub = mk("div", "subcoll", `<div class="label">${esc(key)} is used by ${users.length}</div>`), grid = mk("div", "coll");
+    for (const u of users) {
+      const t = mk("div", "tile", `<div class="top">${dot(u)}${esc(u.name)}</div><div class="file">${esc(u.path.split("/").pop())}</div>`);
+      t.onclick = e => { e.stopPropagation(); select(u.path); };
+      grid.append(t);
+    }
+    sub.append(grid); card.after(sub);
+  };
+  return card;
+}
+function drawDeps() {
+  roomsEl.replaceChildren(); cards = new Map();
+  const keys = [...depUsers.keys()].sort((a, b) => depUsers.get(b).length - depUsers.get(a).length);
+  const own = keys.filter(k => depDecl.has(k)), lib = keys.filter(k => !depDecl.has(k));
+  roomsEl.append(mk("div", "sub", `${own.length} app dependencies and ${lib.length} from libraries. Click a card to list who uses it. The last line shows the frameworks imported by the file that declares it.`));
+  for (const [title, list] of [["App dependencies", own], ["From libraries (clock, uuid...)", lib]]) {
+    if (!list.length) continue;
+    roomsEl.append(mk("h2", "", title));
+    const grid = mk("div", "coll"); list.forEach(k => grid.append(depCard(k))); roomsEl.append(grid);
+  }
+  document.getElementById("q").oninput();
+}
+function filterDeps(q) {
+  for (const c of document.querySelectorAll(".depcard")) {
+    const hide = !!q && !c.dataset.text.includes(q);
+    c.classList.toggle("hide", hide);
+    if (c.nextElementSibling?.classList.contains("subcoll")) c.nextElementSibling.classList.toggle("hide", hide);
+  }
+}
 function select(path) {
   for (const [p, c] of cards) {
     c.className = "card" + (p === path ? " sel" : uses.get(path).has(p) ? " use" : usedBy.get(path).has(p) ? " usedby" : " dim");
@@ -201,6 +263,7 @@ function esc(s) { return s.replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;"
 document.getElementById("q").oninput = () => {
   const q = document.getElementById("q").value.toLowerCase();
   if (modeEl.value === "tree") return filterTree(q);
+  if (modeEl.value === "deps") return filterDeps(q);
   for (const f of files) cards.get(f.path)?.classList.toggle("hide", q && !(f.path + " " + (NAMES[roomOf(f.path)]?.name ?? "") + " " + (FEATURE_OF[f.path] ?? "") + " " + f.types.map(t => t.name).join(" ")).toLowerCase().includes(q));
 };
 draw("folder");

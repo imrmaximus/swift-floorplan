@@ -19,15 +19,14 @@ func reducerLinks(in members: MemberBlockSyntax, typeName: String, isEnum: Bool)
 public func resolveReducerLinks(_ files: [FileSummary]) -> [FileSummary] {
     let known = Set(files.flatMap(\.types).filter(\.isReducer).map(\.name))
     return files.map { file in
-        let types = file.types.map { type in
-            TypeInfo(
-                name: type.name, kind: type.kind, line: type.line, inherits: type.inherits,
-                references: type.references, isReducer: type.isReducer,
-                composes: type.composes.filter { known.contains($0.child) },
-                createsStores: type.createsStores.filter(known.contains)
-            )
+        var resolved = file
+        resolved.types = file.types.map { type in
+            var copy = type
+            copy.composes = type.composes.filter { known.contains($0.child) }
+            copy.createsStores = type.createsStores.filter(known.contains)
+            return copy
         }
-        return FileSummary(path: file.path, imports: file.imports, types: types)
+        return resolved
     }
 }
 

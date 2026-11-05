@@ -19,6 +19,7 @@ Swift 6, macOS 14+, Swift Package Manager, SwiftSyntax for parsing. Tests use Sw
 ## Current scope
 Done: scanner (JSON), static HTML map, folder names file (`--names`), cross-folder features file (`--features`).
 Also done: TCA reducer tree (`isReducer` + `composes` on each type; "Reducer tree" view = root cards with a tile grid of children).
+Also done: Dependencies view (`dependencies` on each type, `dependencyKeys` on each file).
 Also done: several folders in one scan (`--also`, extra files get their folder name as path prefix). Also done: automatic naming. `--auto-name` asks `claude -p` for names of folders and rules for files that have none yet; hand-written entries are never changed.
 
 ## Commands

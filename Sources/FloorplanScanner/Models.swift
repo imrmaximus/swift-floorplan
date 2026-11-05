@@ -35,16 +35,26 @@ public struct TypeInfo: Codable, Equatable, Sendable {
     /// True for `@Reducer` types and types that conform to `Reducer`.
     public let isReducer: Bool
     /// Child reducers this reducer includes. Only known reducers remain after a folder scan.
-    public let composes: [ReducerLink]
+    public var composes: [ReducerLink]
     /// Reducers this type builds a `Store` for, e.g. a view with `Store(initialState: ...) { Feature() }`.
-    public let createsStores: [String]
+    public var createsStores: [String]
+    /// Dependency keys this type reads with `@Dependency(\.name)`, sorted, e.g. "eventClient".
+    public var dependencies: [String] = []
+}
+
+/// One line of `extension DependencyValues { var name: Type { get set } }`.
+public struct DependencyKey: Codable, Equatable, Sendable {
+    public let name: String
+    public let type: String
 }
 
 public struct FileSummary: Codable, Equatable, Sendable {
     /// Path relative to the scanned folder.
     public let path: String
     public let imports: [String]
-    public let types: [TypeInfo]
+    public var types: [TypeInfo]
+    /// Dependency keys declared in this file.
+    public var dependencyKeys: [DependencyKey] = []
 }
 
 public struct ScanResult: Codable, Equatable, Sendable {

@@ -6,7 +6,7 @@ public func scanSource(_ source: String, path: String) -> FileSummary {
     let tree = Parser.parse(source: source)
     let collector = Collector(converter: SourceLocationConverter(fileName: path, tree: tree))
     collector.walk(tree)
-    return FileSummary(path: path, imports: collector.imports.sorted(), types: collector.makeTypes())
+    return FileSummary(path: path, imports: collector.imports.sorted(), types: collector.makeTypes(), dependencyKeys: collector.dependencyKeys)
 }
 
 private final class Collector: SyntaxVisitor {
@@ -19,6 +19,7 @@ private final class Collector: SyntaxVisitor {
         let composes: [ReducerLink]
         var references: Set<String> = []
         var createsStores: Set<String> = []
+        var dependencies: Set<String> = []
     }
 
     private let converter: SourceLocationConverter
@@ -26,6 +27,7 @@ private final class Collector: SyntaxVisitor {
     /// Indices into `drafts` of the types we are currently inside; the last one is the innermost.
     private var openTypes: [Int] = []
     private(set) var imports: Set<String> = []
+    private(set) var dependencyKeys: [DependencyKey] = []
 
     init(converter: SourceLocationConverter) {
         self.converter = converter
@@ -37,7 +39,7 @@ private final class Collector: SyntaxVisitor {
             TypeInfo(
                 name: $0.name, kind: $0.kind, line: $0.line, inherits: $0.inherits,
                 references: $0.references.sorted(), isReducer: $0.isReducer, composes: $0.composes,
-                createsStores: $0.createsStores.sorted()
+                createsStores: $0.createsStores.sorted(), dependencies: $0.dependencies.sorted()
             )
         }
     }
@@ -88,6 +90,32 @@ private final class Collector: SyntaxVisitor {
            node.calledExpression.as(DeclReferenceExprSyntax.self)?.baseName.text == "Store",
            let reducer = trailingClosureReducerName(node) {
             drafts[index].createsStores.insert(reducer)
+        }
+        return .visitChildren
+    }
+
+    // `@Dependency(\.eventClient) var ...` marks the innermost type as a user of "eventClient".
+    override func visit(_ node: VariableDeclSyntax) -> SyntaxVisitorContinueKind {
+        guard let index = openTypes.last else { return .visitChildren }
+        for case .attribute(let attribute) in node.attributes where attribute.attributeName.trimmedDescription == "Dependency" {
+            if case .argumentList(let arguments) = attribute.arguments,
+               let path = arguments.first?.expression.as(KeyPathExprSyntax.self),
+               let key = path.components.first?.component.as(KeyPathPropertyComponentSyntax.self) {
+                drafts[index].dependencies.insert(key.declName.baseName.text)
+            }
+        }
+        return .visitChildren
+    }
+
+    // `extension DependencyValues { var eventClient: EventClient { get set } }` declares a key and its type.
+    override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
+        guard node.extendedType.trimmedDescription == "DependencyValues" else { return .visitChildren }
+        for variable in node.memberBlock.members.compactMap({ $0.decl.as(VariableDeclSyntax.self) }) {
+            for binding in variable.bindings {
+                guard let name = binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.text,
+                      let type = binding.typeAnnotation?.type.trimmedDescription else { continue }
+                dependencyKeys.append(DependencyKey(name: name, type: type))
+            }
         }
         return .visitChildren
     }

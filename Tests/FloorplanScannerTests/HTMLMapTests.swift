@@ -41,6 +41,17 @@ import Testing
     }
 }
 
+@Suite struct DependencyPageTests {
+    @Test func pageHasADependenciesViewAndEmbedsTheScannedData() throws {
+        let file = scanSource("extension DependencyValues { var eventClient: EventClient { get set } }\nstruct Home { @Dependency(\\.eventClient) var e }", path: "Home.swift")
+        let html = try renderHTML(ScanResult(root: "/tmp/x", files: [file]))
+        #expect(html.contains("value=\"deps\""))
+        #expect(html.contains(".depcard"))
+        #expect(html.contains("\"dependencyKeys\""))
+        #expect(html.contains("\"eventClient\""))
+    }
+}
+
 @Suite struct RoomNamesTests {
     private let scan = ScanResult(root: "/tmp/x", files: [scanSource("struct A {}", path: "Features/Inbox/A.swift")])
 
