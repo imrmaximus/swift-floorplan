@@ -44,6 +44,8 @@ public struct TypeInfo: Codable, Equatable, Sendable {
     public var createsStores: [String]
     /// Dependency keys this type reads with `@Dependency(\.name)`, sorted, e.g. "eventClient".
     public var dependencies: [String] = []
+    /// Free functions this type calls by bare name, e.g. "linkEventToProject". After a folder scan only functions declared in the scan remain.
+    public var calls: [String] = []
 }
 
 /// One line of `extension DependencyValues { var name: Type { get set } }`.
@@ -59,6 +61,8 @@ public struct FileSummary: Codable, Equatable, Sendable {
     public var types: [TypeInfo]
     /// Dependency keys declared in this file.
     public var dependencyKeys: [DependencyKey] = []
+    /// Functions declared at the top level of this file (not methods, not nested functions).
+    public var functions: [String] = []
 }
 
 public struct ScanResult: Codable, Equatable, Sendable {

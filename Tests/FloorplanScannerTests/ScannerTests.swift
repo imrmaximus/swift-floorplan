@@ -181,3 +181,23 @@ import Testing
         #expect(scanSource("struct A { var b: B }", path: "A.swift").types.map(\.name) == ["A"])
     }
 }
+
+@Suite struct FreeFunctionTests {
+    @Test func listsTopLevelFunctionsButNotMethodsOrNestedOnes() {
+        let file = scanSource("func helper() { func inner() {} }\nstruct A { func method() {} }", path: "A.swift")
+        #expect(file.functions == ["helper"])
+    }
+
+    @Test func recordsBareCallsOnTheTypeAndOnTopLevelCode() {
+        let file = scanSource("func helper() { other() }\nstruct A { func f() { helper(); x.member() } }", path: "A.swift")
+        #expect(file.types.first { $0.name == "A" }?.calls == ["helper"])
+        #expect(file.types.first { $0.kind == .topLevel }?.calls == ["other"])
+    }
+
+    @Test func folderScanKeepsOnlyCallsToKnownFunctions() {
+        let a = scanSource("func helper() {}", path: "A.swift")
+        let b = scanSource("struct B { func f() { helper(); print(1) } }", path: "B.swift")
+        let resolved = resolveReducerLinks([a, b])
+        #expect(resolved[1].types[0].calls == ["helper"])
+    }
+}

@@ -46,7 +46,7 @@ Without `-o` and `--html`, the JSON goes to stdout.
 Scan results and maps describe your code, so keep `out/` out of version control (it is in this repo's `.gitignore`).
 
 ## How it works and its limits
-It parses each file with SwiftSyntax and records types, what they inherit and which capitalised names they mention. This is a heuristic: a name links to a file only if exactly one scanned file defines it. Reducer detection is syntax only, so reducers built by functions are missed. Only capitalised names are tracked, so a call to a free function (`purgeOldRecords()`) is invisible: a dependency that reaches Core Data only through such a function shows no Core Data. See [DESIGN.md](DESIGN.md) for the details.
+It parses each file with SwiftSyntax and records types, what they inherit and which capitalised names they mention. This is a heuristic: a name links to a file only if exactly one scanned file defines it. Reducer detection is syntax only, so reducers built by functions are missed. Types are found by capitalised names; a bare call to a free function (`purgeOldRecords()`) is followed one hop when exactly one file declares that function. Methods called on a value (`store.purge()`) are not tracked. See [DESIGN.md](DESIGN.md) for the details.
 
 ## Develop
 ```sh

@@ -218,9 +218,14 @@ for (const f of files) for (const t of f.types) {
   if (t.inherits.some(i => COREDATA.test(i))) recordNames.add(n);
 }
 if (!recordNames.size) modeEl.querySelector("[value=entities]").remove();
+// A bare call to a function declared once at the top level of a file counts like a reference to a type: that file's loose code is read.
+const functionFiles = new Map();
+for (const f of files) if (!isTest(f.path, "")) for (const n of f.functions ?? []) functionFiles.set(n, functionFiles.has(n) ? null : f);
 const usesCoreData = t => t.references.some(r => COREDATA.test(r) || recordNames.has(r));
 // A name declared twice (State, Action...) is ambiguous and is skipped; a struct plus its extensions is one type.
-const reachesCoreData = t => usesCoreData(t) || t.references.some(r => { const e = typeIndex.get(r); return e?.declared === 1 && e.parts.some(usesCoreData); });
+const reachesCoreData = t => usesCoreData(t)
+  || t.references.some(r => { const e = typeIndex.get(r); return e?.declared === 1 && e.parts.some(usesCoreData); })
+  || (t.calls ?? []).some(c => functionFiles.get(c)?.types.some(x => x.kind === "topLevel" && usesCoreData(x)));
 // The files that make up a dependency: where its key is declared, where its type is defined, and where types named
 // after it live (LiveReminderClient for ReminderClient). Test types are left out.
 function relatedOf(d) {

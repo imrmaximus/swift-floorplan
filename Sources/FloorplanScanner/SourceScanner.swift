@@ -6,7 +6,7 @@ public func scanSource(_ source: String, path: String) -> FileSummary {
     let tree = Parser.parse(source: source)
     let collector = Collector(converter: SourceLocationConverter(fileName: path, tree: tree))
     collector.walk(tree)
-    return FileSummary(path: path, imports: collector.imports.sorted(), types: collector.makeTypes(), dependencyKeys: collector.dependencyKeys)
+    return FileSummary(path: path, imports: collector.imports.sorted(), types: collector.makeTypes(), dependencyKeys: collector.dependencyKeys, functions: collector.functions)
 }
 
 private final class Collector: SyntaxVisitor {
@@ -20,6 +20,7 @@ private final class Collector: SyntaxVisitor {
         var references: Set<String> = []
         var createsStores: Set<String> = []
         var dependencies: Set<String> = []
+        var calls: Set<String> = []
     }
 
     private let converter: SourceLocationConverter
@@ -29,6 +30,8 @@ private final class Collector: SyntaxVisitor {
     private var topLevelIndex: Int?
     private(set) var imports: Set<String> = []
     private(set) var dependencyKeys: [DependencyKey] = []
+    private(set) var functions: [String] = []
+    private var functionDepth = 0
 
     init(converter: SourceLocationConverter) {
         self.converter = converter
@@ -40,7 +43,7 @@ private final class Collector: SyntaxVisitor {
             TypeInfo(
                 name: $0.name, kind: $0.kind, line: $0.line, inherits: $0.inherits,
                 references: $0.references.sorted(), isReducer: $0.isReducer, composes: $0.composes,
-                createsStores: $0.createsStores.sorted(), dependencies: $0.dependencies.sorted()
+                createsStores: $0.createsStores.sorted(), dependencies: $0.dependencies.sorted(), calls: $0.calls.sorted()
             )
         }
     }
@@ -85,13 +88,21 @@ private final class Collector: SyntaxVisitor {
         return .visitChildren
     }
 
+    // Only functions declared outside every type and outside other functions count as free functions.
+    override func visit(_ node: FunctionDeclSyntax) -> SyntaxVisitorContinueKind {
+        if openTypes.isEmpty && functionDepth == 0 { functions.append(node.name.text) }
+        functionDepth += 1
+        return .visitChildren
+    }
+    override func visitPost(_ node: FunctionDeclSyntax) { functionDepth -= 1 }
+
     // `Store(initialState: ...) { Feature() }` marks the innermost type as the owner of that store.
     override func visit(_ node: FunctionCallExprSyntax) -> SyntaxVisitorContinueKind {
-        if let index = openTypes.last,
-           node.calledExpression.as(DeclReferenceExprSyntax.self)?.baseName.text == "Store",
-           let reducer = trailingClosureReducerName(node) {
+        let callee = node.calledExpression.as(DeclReferenceExprSyntax.self)?.baseName.text
+        if let index = openTypes.last, callee == "Store", let reducer = trailingClosureReducerName(node) {
             drafts[index].createsStores.insert(reducer)
         }
+        if let callee, callee.first?.isLowercase == true { drafts[openTypes.last ?? topLevelDraft()].calls.insert(callee) }
         return .visitChildren
     }
 

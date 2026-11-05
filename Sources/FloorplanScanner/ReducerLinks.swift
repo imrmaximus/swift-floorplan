@@ -39,12 +39,14 @@ private func presentedTypes(_ members: MemberBlockSyntax) -> [String: String] {
 /// Keeps only links to reducers found in the scan, so `Date()` or `UUID()` inside a body disappear.
 public func resolveReducerLinks(_ files: [FileSummary]) -> [FileSummary] {
     let known = Set(files.flatMap(\.types).filter(\.isReducer).map(\.name))
+    let functions = Set(files.flatMap(\.functions))
     return files.map { file in
         var resolved = file
         resolved.types = file.types.map { type in
             var copy = type
             copy.composes = type.composes.filter { known.contains($0.child) }
             copy.createsStores = type.createsStores.filter(known.contains)
+            copy.calls = type.calls.filter(functions.contains)
             return copy
         }
         return resolved

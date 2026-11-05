@@ -62,6 +62,8 @@ import Testing
         #expect(html.contains("\"NSManagedObject\""))
         // A dependency is credited through its own client type, not through every type in its files.
         #expect(html.contains("relatedOf(d).named"))
+        // A call to a free function that touches Core Data counts as one hop.
+        #expect(html.contains("functionFiles"))
     }
 }
 
