@@ -39,3 +39,4 @@ It parses each file with SwiftSyntax and records types, what they inherit and wh
 ```sh
 swift test
 ```
+The command line is thin: `Command.swift` parses the flags and runs the job, so tests cover it. Only `main.swift` (usage message, exit codes, the `claude -p` runner) is untested.

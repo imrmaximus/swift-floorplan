@@ -207,14 +207,18 @@ if (!depUsers.size) modeEl.querySelector("[value=deps]").remove();
 // client that goes through a repository still counts; two hops would reach nearly everything.
 const COREDATA = /^(NSManagedObject|NSFetchRequest|NSPersistent|NSFetchedResults|NSBatch|NSEntityDescription)/;
 const isTest = (path, name) => /Tests?\//.test(path) || /Tests?$/.test(name);
-const typeIndex = new Map(), recordNames = new Set();
+const typeIndex = new Map(), recordNames = new Set(); // name -> { declared: how many real declarations, parts: struct + extensions }
 for (const f of files) for (const t of f.types) {
-  const n = t.name.split(".").pop().replace(" (extension)", "");
-  if (!isTest(f.path, t.name)) { if (!typeIndex.has(n)) typeIndex.set(n, []); typeIndex.get(n).push(t); }
+  const isExt = t.kind === "extension", n = t.name.split(".").pop().replace(" (extension)", "");
+  if (!isTest(f.path, t.name)) {
+    if (!typeIndex.has(n)) typeIndex.set(n, { declared: 0, parts: [] });
+    const entry = typeIndex.get(n); entry.parts.push(t); if (!isExt) entry.declared++;
+  }
   if (t.inherits.some(i => COREDATA.test(i))) recordNames.add(n);
 }
 const usesCoreData = t => t.references.some(r => COREDATA.test(r) || recordNames.has(r));
-const reachesCoreData = t => usesCoreData(t) || t.references.some(r => { const l = typeIndex.get(r); return l?.length === 1 && usesCoreData(l[0]); });
+// A name declared twice (State, Action...) is ambiguous and is skipped; a struct plus its extensions is one type.
+const reachesCoreData = t => usesCoreData(t) || t.references.some(r => { const e = typeIndex.get(r); return e?.declared === 1 && e.parts.some(usesCoreData); });
 // The files that make up a dependency: where its key is declared, where its type is defined, and where types named
 // after it live (LiveReminderClient for ReminderClient). Test types are left out.
 function relatedOf(d) {
