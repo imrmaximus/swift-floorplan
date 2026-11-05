@@ -1,0 +1,4 @@
+.build/
+*.json.out
+# Scans of the private target app: file paths and type names. Regenerate, never publish.
+out/
