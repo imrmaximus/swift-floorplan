@@ -50,6 +50,29 @@ import Testing
         #expect(found == [ReducerLink(child: "P.Destination", via: .ifLet)])
     }
 
+    @Test func ifLetWithoutClosureLinksToThePresentedType() {
+        let source = """
+        @Reducer struct P {
+            struct State { @Presents var itemDetail: ItemDetail.State? }
+            var body: some ReducerOf<Self> { Reduce { _, _ in .none }.ifLet(\\.$itemDetail, action: \\.itemDetail) }
+        }
+        """
+        let found = scanSource(source, path: "A.swift").types[0].composes
+        #expect(found == [ReducerLink(child: "ItemDetail", via: .ifLet)])
+    }
+
+    @Test func presentedDestinationKeepsTheNestedEnumName() {
+        let source = """
+        @Reducer struct P {
+            @Reducer enum Destination {}
+            struct State { @Presents var destination: Destination.State? }
+            var body: some ReducerOf<Self> { Reduce { _, _ in .none }.ifLet(\\.$destination, action: \\.destination) }
+        }
+        """
+        let found = scanSource(source, path: "A.swift").types[0].composes
+        #expect(found == [ReducerLink(child: "P.Destination", via: .ifLet)])
+    }
+
     @Test func unwrapsReduceAroundTheChildInsideScope() {
         let found = links("Scope(state: \\.a, action: \\.a) { Reduce(AFeature()) }")
         #expect(found == [ReducerLink(child: "AFeature", via: .scope)])

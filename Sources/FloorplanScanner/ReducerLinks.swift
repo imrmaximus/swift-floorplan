@@ -9,10 +9,31 @@ func isReducerDeclaration(attributes: AttributeListSyntax, inherits: [String]) -
 /// Finds the child reducers a reducer type includes in its `body` (and, for enums, in its cases).
 /// Names are raw: they may point at things that are not reducers. `resolveReducerLinks` filters them.
 func reducerLinks(in members: MemberBlockSyntax, typeName: String, isEnum: Bool) -> [ReducerLink] {
-    let finder = LinkFinder(typeName: typeName)
+    let finder = LinkFinder(typeName: typeName, presented: presentedTypes(members), nested: nestedTypeNames(members))
     finder.walk(members)
     let caseLinks = isEnum ? enumCaseLinks(members) : []
     return dedupe(finder.links + caseLinks)
+}
+
+private func nestedTypeNames(_ members: MemberBlockSyntax) -> Set<String> {
+    Set(members.members.compactMap { item -> String? in
+        item.decl.as(StructDeclSyntax.self)?.name.text ?? item.decl.as(EnumDeclSyntax.self)?.name.text
+    })
+}
+
+/// `@Presents var itemDetail: ItemDetail.State?` in the nested `State` -> ["itemDetail": "ItemDetail"].
+/// ponytail: only a `State` declared inside the reducer; one declared in an extension is not read.
+private func presentedTypes(_ members: MemberBlockSyntax) -> [String: String] {
+    var result: [String: String] = [:]
+    let states = members.members.compactMap { $0.decl.as(StructDeclSyntax.self) }.filter { $0.name.text == "State" }
+    for variable in states.flatMap({ $0.memberBlock.members.compactMap { $0.decl.as(VariableDeclSyntax.self) } }) {
+        let names = variable.attributes.compactMap { $0.as(AttributeSyntax.self)?.attributeName.trimmedDescription }
+        guard names.contains("Presents") || names.contains("PresentationState"),
+              let binding = variable.bindings.first, let type = binding.typeAnnotation?.type.trimmedDescription else { continue }
+        let owner = type.replacingOccurrences(of: "?", with: "").split(separator: ".").first.map(String.init)
+        if let owner { result[binding.pattern.trimmedDescription] = owner }
+    }
+    return result
 }
 
 /// Keeps only links to reducers found in the scan, so `Date()` or `UUID()` inside a body disappear.
@@ -61,10 +82,14 @@ private func staticBodyOwner(_ access: MemberAccessExprSyntax) -> String? {
 private final class LinkFinder: SyntaxVisitor {
     private static let chainMethods: [String: LinkKind] = ["ifLet": .ifLet, "forEach": .forEach, "ifCaseLet": .ifLet]
     private let typeName: String
+    private let presented: [String: String]
+    private let nested: Set<String>
     private(set) var links: [ReducerLink] = []
 
-    init(typeName: String) {
+    init(typeName: String, presented: [String: String], nested: Set<String>) {
         self.typeName = typeName
+        self.presented = presented
+        self.nested = nested
         super.init(viewMode: .sourceAccurate)
     }
 
@@ -113,7 +138,10 @@ private final class LinkFinder: SyntaxVisitor {
         } else if let key = call.arguments.first?.expression.as(KeyPathExprSyntax.self) {
             // `.ifLet(\.$destination, action: ...)` with no closure: the child is the nested `Destination` enum.
             let word = key.trimmedDescription.filter { $0.isLetter || $0.isNumber }
-            links.append(ReducerLink(child: "\(typeName).\(word.prefix(1).uppercased())\(word.dropFirst())", via: kind))
+            // The presented type is the child. A type nested in this reducer (`Destination`) needs the parent's name.
+            let owner = presented[word] ?? "\(word.prefix(1).uppercased())\(word.dropFirst())"
+            let child = presented[word] == nil || nested.contains(owner) ? "\(typeName).\(owner)" : owner
+            links.append(ReducerLink(child: child, via: kind))
         }
     }
 }
