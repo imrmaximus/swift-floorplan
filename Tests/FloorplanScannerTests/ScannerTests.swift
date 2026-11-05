@@ -201,3 +201,26 @@ import Testing
         #expect(resolved[1].types[0].calls == ["helper"])
     }
 }
+
+@Suite struct ExtensionMemberTests {
+    @Test func recordsMembersDeclaredInATypeAndMembersUsedByName() {
+        let file = scanSource("extension Calendar { static let fr = 1; func shift() { let local = 2 } }\nstruct A { func f() { _ = Calendar.fr; _ = x.shift() } }", path: "A.swift")
+        #expect(file.types.first { $0.kind == .extension }?.members == ["fr", "shift"])
+        #expect(file.types.first { $0.name == "A" }?.memberRefs == ["fr", "shift"])
+    }
+
+    @Test func folderScanKeepsOnlyNamesDeclaredOnceInsideAnExtension() {
+        let ext = scanSource("extension Calendar { static let fr = 1 }", path: "Calendar+App.swift")
+        let own = scanSource("struct Item { var id = 1 }\nextension Item { var title: String { \"\" } }", path: "Item.swift")
+        let other = scanSource("extension Date { var id: Int { 0 } }", path: "Date+App.swift")
+        let user = scanSource("struct U { let c: Calendar = .fr; let i = Item().id; let t = Item().title }", path: "U.swift")
+        let resolved = resolveReducerLinks([ext, own, other, user])
+        #expect(resolved[3].types[0].memberRefs == ["fr", "title"]) // "id" is declared twice, so it is dropped
+        #expect(resolved[1].types.flatMap(\.members) == ["title"]) // "id" lives in a real type, "title" in an extension
+    }
+
+    @Test func pageLinksFilesThroughSharedMembers() throws {
+        let html = try renderHTML(ScanResult(root: "/tmp/x", files: [scanSource("extension Calendar { static let fr = 1 }", path: "C.swift")]))
+        #expect(html.contains("memberFile"))
+    }
+}

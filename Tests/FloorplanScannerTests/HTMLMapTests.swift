@@ -98,3 +98,49 @@ import Testing
         #expect(html.contains("const NAMES = {}"))
     }
 }
+
+@Suite struct GraphPanelTests {
+    @Test func fileAndReducerPanelsDrawTheNeighbourGraph() throws {
+        let file = scanSource("struct A { let b: B }", path: "A.swift")
+        let html = try renderHTML(ScanResult(root: "/tmp/x", files: [file]))
+        #expect(html.contains("function neighbourGraph"))
+        // One drawing function serves both panels, and each click hands a key back.
+        #expect(html.contains("neighbourGraph(r.name"))
+        #expect(html.contains("g[data-p]"))
+        // Deselecting and cutting long lists are part of the contract.
+        #expect(html.contains("GRAPH_MAX"))
+    }
+}
+
+@Suite struct GraphOptionTests {
+    @Test func pageCanDrawEveryViewAsOneGraphWithoutAnyOutsideCode() throws {
+        let file = scanSource("struct A { let b: B }", path: "A.swift")
+        let html = try renderHTML(ScanResult(root: "/tmp/x", files: [file]))
+        #expect(html.contains("id=\"graphToggle\""))
+        #expect(html.contains("function drawGraph"))
+        #expect(!html.contains("__GRAPH_SCRIPT__"))
+        // The page must stay offline and self-contained: no script, style or request to another host.
+        #expect(!html.contains("<script src"))
+        #expect(!html.contains("http://") && !html.contains("https://"))
+        #expect(!html.contains("fetch(") && !html.contains("XMLHttpRequest"))
+    }
+
+    @Test func graphHasAGroupFilterWithBulkActionsAndLinkedGroups() throws {
+        let file = scanSource("struct A { let b: B }", path: "A.swift")
+        let html = try renderHTML(ScanResult(root: "/tmp/x", files: [file]))
+        #expect(html.contains("function groupSelection"))
+        #expect(html.contains("data-all=\"1\"") && html.contains("data-all=\"0\""))
+        #expect(html.contains("Linked to the shown "))
+        #expect(html.contains("graph.onClear"))
+        #expect(html.contains("id=\"groups\""))
+    }
+
+    @Test func cardViewsCanShowOnlyOrphanFiles() throws {
+        let file = scanSource("struct A {}", path: "A.swift")
+        let html = try renderHTML(ScanResult(root: "/tmp/x", files: [file]))
+        #expect(html.contains("id=\"orphanToggle\""))
+        #expect(html.contains("const isOrphan"))
+        #expect(html.contains("files.filter(isOrphan)"))
+        #expect(html.contains("not used by any file and not using any other file"))
+    }
+}

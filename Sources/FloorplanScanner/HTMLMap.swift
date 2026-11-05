@@ -25,6 +25,7 @@ public func renderHTML(_ result: ScanResult, names: [String: RoomName] = [:], fe
     let namesJSON = names.isEmpty ? "{}" : String(decoding: try sortedJSON(names), as: UTF8.self)
     let featureOf = assignFeatures(result.files, rules: features, ignoringFolders: result.extraFolders)
     return mapTemplate
+        .replacingOccurrences(of: "__GRAPH_SCRIPT__", with: graphScript)
         .replacingOccurrences(of: "__SCAN_DATA__", with: safeInScript(String(decoding: try encodeJSON(result), as: UTF8.self)))
         .replacingOccurrences(of: "__ROOM_NAMES__", with: safeInScript(namesJSON))
         .replacingOccurrences(of: "__FEATURE_OF__", with: safeInScript(String(decoding: try sortedJSON(featureOf), as: UTF8.self)))

@@ -46,6 +46,11 @@ public struct TypeInfo: Codable, Equatable, Sendable {
     public var dependencies: [String] = []
     /// Free functions this type calls by bare name, e.g. "linkEventToProject". After a folder scan only functions declared in the scan remain.
     public var calls: [String] = []
+    /// Properties and methods declared directly in this type, e.g. "fr" in `extension Calendar { static let fr }`.
+    /// After a folder scan only names declared once in the scan, inside an extension, remain.
+    public var members: [String] = []
+    /// Member names this type uses (`.fr`, `Calendar.fr`, `value.format()`). After a folder scan only the names above remain.
+    public var memberRefs: [String] = []
 }
 
 /// One line of `extension DependencyValues { var name: Type { get set } }`.

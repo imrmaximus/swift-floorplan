@@ -40,6 +40,7 @@ private func presentedTypes(_ members: MemberBlockSyntax) -> [String: String] {
 public func resolveReducerLinks(_ files: [FileSummary]) -> [FileSummary] {
     let known = Set(files.flatMap(\.types).filter(\.isReducer).map(\.name))
     let functions = Set(files.flatMap(\.functions))
+    let shared = extensionMemberNames(files)
     return files.map { file in
         var resolved = file
         resolved.types = file.types.map { type in
@@ -47,10 +48,23 @@ public func resolveReducerLinks(_ files: [FileSummary]) -> [FileSummary] {
             copy.composes = type.composes.filter { known.contains($0.child) }
             copy.createsStores = type.createsStores.filter(known.contains)
             copy.calls = type.calls.filter(functions.contains)
+            copy.members = type.members.filter(shared.contains)
+            copy.memberRefs = type.memberRefs.filter(shared.contains)
             return copy
         }
         return resolved
     }
+}
+
+/// Member names declared exactly once in the whole scan, and inside an extension (`static let fr` in `extension Calendar`).
+/// A name declared twice, or in a real type, is skipped: `id` or `count` would link half the app to one file.
+/// ponytail: a name that also exists on a system type (`isEmpty`) still links to the one extension that redeclares it.
+private func extensionMemberNames(_ files: [FileSummary]) -> Set<String> {
+    var declared: [String: (count: Int, inExtension: Bool)] = [:]
+    for type in files.flatMap(\.types) {
+        for name in type.members { declared[name] = ((declared[name]?.count ?? 0) + 1, type.kind == .extension) }
+    }
+    return Set(declared.filter { $0.value.count == 1 && $0.value.inExtension }.keys)
 }
 
 /// One link per child; a precise link (scope, ifLet, ...) wins over a plain mention in `body`.

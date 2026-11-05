@@ -42,12 +42,18 @@ let mapTemplate = #"""
   .subcoll { grid-column:1/-1; background:var(--bg); border-radius:12px; padding:10px; border-left:4px solid var(--line); }
   .subcoll.scope { border-left-color:var(--scope); } .subcoll.ifLet { border-left-color:var(--ifLet); } .subcoll.forEach { border-left-color:var(--forEach); } .subcoll.body { border-left-color:var(--body); } .subcoll.enumCase { border-left-color:var(--enumCase); }
   .subcoll > .label { color:var(--dim); font-size:12px; margin-bottom:8px; } .subcoll .tile { background:#fff; }
+  .gtoggle { display:flex; align-items:center; gap:4px; white-space:nowrap; } .gtoggle input { flex:none; padding:0; }
+  .graphcv { display:block; width:100%; background:var(--card); border-radius:16px; box-shadow:0 1px 3px #0002; cursor:grab; }
+  #groups { background:var(--card); border-radius:12px; box-shadow:0 1px 3px #0002; padding:12px 16px; margin-bottom:16px; }
+  #groups h1 { margin:0 0 8px; } #groups h2 { margin:12px 0 6px; }
+  .gbtns { display:flex; gap:6px; } .gbtns button, .grow button { font:inherit; font-size:12px; padding:3px 8px; border:1px solid var(--line); border-radius:6px; background:var(--card); cursor:pointer; }
+  .glist { max-height:180px; overflow:auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); column-gap:16px; } .grow { display:flex; align-items:center; gap:6px; margin:3px 0; font-size:13px; } .grow .gname { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .grow input { flex:none; padding:0; }
   .rpanel ul { list-style:none; margin:0; padding:0; } .rpanel li { display:flex; gap:6px; align-items:center; }
 </style></head>
 <body>
 <main><h1>swift-floorplan</h1><div class="sub" id="sub"></div>
-  <div class="bar"><input id="q" placeholder="Filter by file, folder, feature or type name"><select id="mode"><option value="folder">Group by folder</option><option value="feature">Group by feature</option><option value="tree">Reducer tree</option><option value="deps">Dependencies</option><option value="entities">Core Data</option></select></div><div id="rooms"></div></main>
-<aside id="side"><div class="sub">Click a file card. Green = files it uses. Blue = files that use it.</div></aside>
+  <div class="bar"><input id="q" placeholder="Filter by file, folder, feature or type name"><select id="mode"><option value="folder">Group by folder</option><option value="feature">Group by feature</option><option value="tree">Reducer tree</option><option value="deps">Dependencies</option><option value="entities">Core Data</option></select><label class="gtoggle"><input type="checkbox" id="graphToggle"> Graph</label><label class="gtoggle" id="orphanLabel"><input type="checkbox" id="orphanToggle"> Orphans only</label></div><div id="groups" hidden></div><div id="rooms"></div></main>
+<aside><div id="side"><div class="sub">Click a file card. Green = files it uses. Blue = files that use it.</div></div></aside>
 <script>
 const DATA = __SCAN_DATA__;
 const NAMES = __ROOM_NAMES__;
@@ -68,6 +74,13 @@ for (const f of files) for (const t of f.types) for (const r of [...t.references
   const d = definers.get(r);
   if (d && d.size === 1) { const [to] = d; if (to !== f.path) { uses.get(f.path).add(to); usedBy.get(to).add(f.path); } }
 }
+// A member declared once, in an extension (`Calendar.fr`), links the files that use it. The scanner already dropped the other names.
+const memberFile = new Map();
+for (const f of files) for (const t of f.types) for (const m of t.members ?? []) memberFile.set(m, memberFile.has(m) ? null : f.path);
+for (const f of files) for (const t of f.types) for (const m of t.memberRefs ?? []) {
+  const to = memberFile.get(m);
+  if (to && to !== f.path) { uses.get(f.path).add(to); usedBy.get(to).add(f.path); }
+}
 const roomOf = p => p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "(top level)";
 const featureInfo = new Map(FEATURES.map(x => [x.name, x]));
 const UNASSIGNED = "Unassigned";
@@ -80,21 +93,29 @@ if (!hasFeatures) modeEl.querySelector("[value=feature]").remove();
 if (!reducers.length) modeEl.querySelector("[value=tree]").remove();
 modeEl.hidden = modeEl.options.length < 2;
 modeEl.onchange = () => draw(modeEl.value);
+// An orphan neither uses nor is used by another scanned file (by the same name-based links as above).
+const orphanToggle = document.getElementById("orphanToggle"), orphanLabel = document.getElementById("orphanLabel");
+const isOrphan = f => !uses.get(f.path).size && !usedBy.get(f.path).size;
+orphanToggle.onchange = () => draw(modeEl.value);
 // Group the files into titled sections: by folder, or by feature when a features file was given.
 function draw(mode) {
-  selectedPath = null;
+  selectedPath = null; graph.stop++; graph.paint = null; graph.onClear = null; groupsEl.hidden = true; sideEl.onclick = null; sideEl.innerHTML = SIDE_HINT;
+  orphanLabel.hidden = mode !== "folder" && mode !== "feature"; // the other views have no file nodes
+  if (graphToggle.checked) return drawGraph(mode);
   if (mode === "tree") return drawTree();
   if (mode === "deps") return drawDeps();
   if (mode === "entities") return drawEntities();
-  const groups = new Map();
-  for (const f of files) {
+  const groups = new Map(), shownFiles = orphanToggle.checked ? files.filter(isOrphan) : files;
+  for (const f of shownFiles) {
     const key = mode === "feature" ? (FEATURE_OF[f.path] ?? UNASSIGNED) : roomOf(f.path);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(f);
   }
   roomsEl.replaceChildren(); cards = new Map();
   const keys = [...groups.keys()].sort((a, b) => (a === UNASSIGNED) - (b === UNASSIGNED) || (mode === "feature" ? FEATURES.findIndex(x => x.name === a) - FEATURES.findIndex(x => x.name === b) : 0));
-  roomsEl.append(mk("div", "sub", `${keys.length} ${mode === "feature" ? "features" : "folders"}. Click a file to see what it uses (green) and what uses it (blue).`));
+  roomsEl.append(mk("div", "sub", orphanToggle.checked
+    ? `${shownFiles.length} orphan files in ${keys.length} ${mode === "feature" ? "features" : "folders"}: not used by any file and not using any other file.`
+    : `${keys.length} ${mode === "feature" ? "features" : "folders"}. Click a file to see what it uses (green) and what uses it (blue).`));
   const list = mk("div", "roots");
   for (const key of keys) {
     const label = mode === "feature" ? featureInfo.get(key) : NAMES[key], gfiles = groups.get(key);
@@ -158,11 +179,12 @@ function selectReducer(r, node) {
   const rows = (list, text) => list.map(p => `<li>${link(p.name ?? p.child)} <span class="pill ${p.via}">${p.via}</span></li>`).join("") || `<li><code>${text}</code></li>`;
   const made = creators.get(r.name) ?? [];
   document.getElementById("side").innerHTML = `<div class="rpanel"><h1>${dot(r)}${esc(r.name)}</h1><div class="sub">${esc(r.path)}<br>Feature: ${esc(featureOf(r))}</div>
+    <h2>Graph</h2>${neighbourGraph(r.name, (parentsOf.get(r.name) ?? []).map(p => ({ key: p.name, label: p.name })), kidsOf(r).map(c => ({ key: c.child, label: c.child })))}
     <h2>Included by</h2><ul>${rows(parentsOf.get(r.name) ?? [], "nobody (root)")}</ul>
     <h2>Includes</h2><ul>${rows(kidsOf(r), "nothing")}</ul>
     <h2>Store created by</h2><ul>${made.map(n => `<li>${esc(n)}</li>`).join("") || "<li><code>no view</code></li>"}</ul></div>`;
-  document.querySelectorAll("#side a").forEach(a => a.onclick = () => {
-    const n = byName.get(a.dataset.n);
+  document.querySelectorAll("#side a, #side g[data-p]").forEach(a => a.onclick = () => {
+    const n = byName.get(a.dataset.n ?? a.dataset.p);
     selectReducer(n, document.querySelector(`.tile[data-name="${CSS.escape(n.name)}"]`) ?? mk("div", ""));
   });
 }
@@ -336,8 +358,28 @@ function deselect() {
   selectedPath = null;
   for (const c of cards.values()) c.className = "tile";
   document.getElementById("side").innerHTML = SIDE_HINT;
+  graph.sel = null; graph.onClear?.();
 }
 document.addEventListener("keydown", e => { if (e.key === "Escape" && selectedPath) deselect(); });
+// Neighbour graph of the selected file or reducer: what points at it on the left (blue), what it points at on the
+// right (green). Hand-written SVG, at most GRAPH_MAX nodes per side; a "+N more" node stands for the rest.
+// Items are { key, label }; a click on a node hands its key back through data-p.
+const GRAPH_MAX = 10;
+const fileItems = set => [...set].sort().map(p => ({ key: p, label: p.split("/").pop().replace(".swift", "") }));
+function neighbourGraph(centerLabel, leftItems, rightItems) {
+  const W = 316, BW = 98, ROW = 28;
+  const side = (all, x) => { const shown = all.slice(0, GRAPH_MAX).map(n => ({ p: n.key, label: n.label })); if (all.length > GRAPH_MAX) shown.push({ label: `+${all.length - GRAPH_MAX} more` }); return shown.map(n => ({ ...n, x })); };
+  const left = side(leftItems, 0), right = side(rightItems, W - BW);
+  const rows = Math.max(left.length, right.length, 1), H = rows * ROW, cy = H / 2, cx = (W - BW) / 2;
+  const place = (list, color, toCenter) => list.map((n, i) => {
+    const y = (H - list.length * ROW) / 2 + i * ROW + ROW / 2, edgeX = n.x === 0 ? BW : n.x, cEdge = n.x === 0 ? cx : cx + BW;
+    const [x1, y1, x2, y2] = toCenter ? [edgeX, y, cEdge, cy] : [cEdge, cy, edgeX, y];
+    const box = `<g ${n.p ? `data-p="${esc(n.p)}" style="cursor:pointer"` : ""}><title>${esc(n.p ?? n.label)}</title><rect x="${n.x}" y="${y - 11}" width="${BW}" height="22" rx="6" fill="#fff" stroke="${color}"/><text x="${n.x + BW / 2}" y="${y + 4}" text-anchor="middle" font-size="11" fill="#1d1d1f">${esc(n.label.length > 15 ? n.label.slice(0, 14) + "…" : n.label)}</text></g>`;
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" marker-end="url(#a${color.slice(1)})"/>${box}`;
+  }).join("");
+  const marker = c => `<marker id="a${c.slice(1)}" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="${c}"/></marker>`;
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${marker("#34c759")}${marker("#007aff")}</defs>${place(left, "#007aff", true)}${place(right, "#34c759", false)}<g><rect x="${cx}" y="${cy - 13}" width="${BW}" height="26" rx="6" fill="#ff9500"/><text x="${cx + BW / 2}" y="${cy + 4}" text-anchor="middle" font-size="11" font-weight="600" fill="#fff">${esc(centerLabel.slice(0, 15))}</text></g></svg>`;
+}
 function select(path) {
   selectedPath = path;
   for (const [p, c] of cards) {
@@ -346,18 +388,22 @@ function select(path) {
   const f = files.find(x => x.path === path), side = document.getElementById("side");
   const list = set => [...set].sort().map(p => `<li><a data-p="${esc(p)}">${esc(p)}</a></li>`).join("") || "<li><code>none</code></li>";
   side.innerHTML = `<h1>${esc(f.path)}</h1><div class="sub">imports: ${esc(f.imports.join(", ") || "none")}</div>
+    <h2>Graph</h2>${neighbourGraph(fileItems([path])[0].label, fileItems(usedBy.get(path)), fileItems(uses.get(path)))}
     <h2>Types</h2><ul>${f.types.map(t => `<li>${t.kind} <b>${esc(t.name)}</b> <code>line ${t.line}${t.inherits.length ? " : " + esc(t.inherits.join(", ")) : ""}</code></li>`).join("") || "<li><code>none</code></li>"}</ul>
     <h2>Uses</h2><ul>${list(uses.get(path))}</ul><h2>Used by</h2><ul>${list(usedBy.get(path))}</ul>`;
-  side.querySelectorAll("a").forEach(a => a.onclick = () => select(a.dataset.p));
+  side.querySelectorAll("a, g[data-p]").forEach(a => a.onclick = () => select(a.dataset.p));
 }
 function esc(s) { return s.replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]); }
 document.getElementById("q").oninput = () => {
   const q = document.getElementById("q").value.toLowerCase();
+  if (graph.paint) return graph.paint();
   if (modeEl.value === "tree") return filterTree(q);
   if (modeEl.value === "deps" || modeEl.value === "entities") return filterDeps(q);
   for (const f of files) cards.get(f.path)?.classList.toggle("hide", !!q && !(f.path + " " + (NAMES[roomOf(f.path)]?.name ?? "") + " " + (FEATURE_OF[f.path] ?? "") + " " + f.types.map(t => t.name).join(" ")).toLowerCase().includes(q));
   for (const card of document.querySelectorAll(".rootcard")) card.classList.toggle("hide", !card.querySelector(".tile:not(.hide)"));
 };
+__GRAPH_SCRIPT__
+graphToggle.onchange = () => draw(modeEl.value);
 draw("folder");
 </script></body></html>
 """#

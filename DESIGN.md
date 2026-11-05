@@ -25,6 +25,12 @@ SwiftSyntax, not regex: it understands nesting, attributes and macros, and it is
 - A reference is attributed to the innermost type only.
 - Cross-file linking (which file defines `LifeItem`) is not done in the scanner; the map step can join on type names.
 
+## Graph option
+One force-directed layout per view, on a canvas, in `GraphTemplate.swift`. Every node repels every other one, so it is O(n²) per step: fine for a few thousand nodes, then use a grid or quadtree. No library, so the page stays offline and a test checks that it never loads outside code. Nodes outside the checked folders or features are not drawn; the sidebar lists the groups linked to the shown ones.
+
+## Member links
+`extension Calendar { static let fr }` is only found through its members. The scanner records the members each type declares and the member names each type uses (`.fr`, `x.format()`). After a folder scan it keeps only names declared exactly once in the whole scan and inside an extension, so common names (`id`, `count`) never link. A unique extension member that shares its name with a system member would still link; accepted for now.
+
 ## Features (cross-folder grouping)
 `features.json` is an ordered list of `{ name, purpose, match: [words] }`. A file joins the first feature whose word appears in its path (case-insensitive). Files that match nothing show under "Unassigned". The map has a "Group by folder / feature" switch. Matching is a plain substring on the path, so a word like `tag` can catch unrelated names; check the Unassigned list and the biggest groups after editing the rules.
 

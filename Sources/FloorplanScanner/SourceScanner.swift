@@ -21,6 +21,8 @@ private final class Collector: SyntaxVisitor {
         var createsStores: Set<String> = []
         var dependencies: Set<String> = []
         var calls: Set<String> = []
+        var members: Set<String> = []
+        var memberRefs: Set<String> = []
     }
 
     private let converter: SourceLocationConverter
@@ -43,7 +45,8 @@ private final class Collector: SyntaxVisitor {
             TypeInfo(
                 name: $0.name, kind: $0.kind, line: $0.line, inherits: $0.inherits,
                 references: $0.references.sorted(), isReducer: $0.isReducer, composes: $0.composes,
-                createsStores: $0.createsStores.sorted(), dependencies: $0.dependencies.sorted(), calls: $0.calls.sorted()
+                createsStores: $0.createsStores.sorted(), dependencies: $0.dependencies.sorted(), calls: $0.calls.sorted(),
+                members: $0.members.sorted(), memberRefs: $0.memberRefs.sorted()
             )
         }
     }
@@ -91,6 +94,7 @@ private final class Collector: SyntaxVisitor {
     // Only functions declared outside every type and outside other functions count as free functions.
     override func visit(_ node: FunctionDeclSyntax) -> SyntaxVisitorContinueKind {
         if openTypes.isEmpty && functionDepth == 0 { functions.append(node.name.text) }
+        if let index = openTypes.last, node.parent?.is(MemberBlockItemSyntax.self) == true { drafts[index].members.insert(node.name.text) }
         functionDepth += 1
         return .visitChildren
     }
@@ -106,9 +110,18 @@ private final class Collector: SyntaxVisitor {
         return .visitChildren
     }
 
+    // `.fr` and `Calendar.fr` mention the member "fr", whatever the type in front of it.
+    override func visit(_ node: MemberAccessExprSyntax) -> SyntaxVisitorContinueKind {
+        drafts[openTypes.last ?? topLevelDraft()].memberRefs.insert(node.declName.baseName.text)
+        return .visitChildren
+    }
+
     // `@Dependency(\.eventClient) var ...` marks the innermost type as a user of "eventClient".
     override func visit(_ node: VariableDeclSyntax) -> SyntaxVisitorContinueKind {
         guard let index = openTypes.last else { return .visitChildren }
+        if node.parent?.is(MemberBlockItemSyntax.self) == true {
+            for binding in node.bindings { if let name = binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.text { drafts[index].members.insert(name) } }
+        }
         for case .attribute(let attribute) in node.attributes where attribute.attributeName.trimmedDescription == "Dependency" {
             if case .argumentList(let arguments) = attribute.arguments,
                let path = arguments.first?.expression.as(KeyPathExprSyntax.self),

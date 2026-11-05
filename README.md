@@ -10,6 +10,8 @@ Everything runs on your machine. The map is a single static HTML page with the d
 - **Reducer tree** for [TCA](https://github.com/pointfreeco/swift-composable-architecture) apps: root reducers as cards, child reducers as tiles colored by how they are included (scope, ifLet, forEach, body, enumCase), plus the view that creates each root store.
 - **Dependencies view** for TCA apps: every `@Dependency(\.name)` as a card with its type, the frameworks its file imports (EventKit, CoreData...) and the types that use it. Filter by "eventkit" to see what touches the calendar, or `!coredata` to see what does not touch the database.
 - **Core Data view**: one card per record class (a subclass of `NSManagedObject`), with the dependencies and types that mention it.
+- **Graph option**: tick "Graph" to draw the current view as one graph of all its nodes (files, reducers, dependencies or records), with every name shown. Filter by folder or feature (select all / unselect all); groups linked to the shown ones are listed in the sidebar. Drag to pan, scroll to zoom. It is plain code on a canvas: no library, no network.
+- **Orphans only**: in the folder and feature views (cards and graph), show only the files that no file uses and that use no other file.
 - A filter box that works in every view.
 
 ## Requirements
@@ -46,7 +48,7 @@ Without `-o` and `--html`, the JSON goes to stdout.
 Scan results and maps describe your code, so keep `out/` out of version control (it is in this repo's `.gitignore`).
 
 ## How it works and its limits
-It parses each file with SwiftSyntax and records types, what they inherit and which capitalised names they mention. This is a heuristic: a name links to a file only if exactly one scanned file defines it. Reducer detection is syntax only, so reducers built by functions are missed. Types are found by capitalised names; a bare call to a free function (`purgeOldRecords()`) is followed one hop when exactly one file declares that function. Methods called on a value (`store.purge()`) are not tracked. See [DESIGN.md](DESIGN.md) for the details.
+It parses each file with SwiftSyntax and records types, what they inherit and which capitalised names they mention. This is a heuristic: a name links to a file only if exactly one scanned file defines it. Reducer detection is syntax only, so reducers built by functions are missed. Types are found by capitalised names; a bare call to a free function (`purgeOldRecords()`) is followed one hop when exactly one file declares that function. A member declared once, inside an extension (`static let fr` in `extension Calendar`), links the files that use that name (`.fr`, `Calendar.fr`, `value.format()`); a name declared twice, or in a real type, is skipped because it would link too much. Methods called on a value are otherwise not tracked. See [DESIGN.md](DESIGN.md) for the details.
 
 ## Develop
 ```sh
