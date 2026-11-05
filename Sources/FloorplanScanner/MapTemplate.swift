@@ -32,7 +32,8 @@ let mapTemplate = #"""
   .coll { display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:8px; }
   .tile { background:#fafafc; border:1px solid var(--line); border-left:4px solid var(--body); border-radius:10px; padding:8px 10px; cursor:pointer; min-height:58px; display:flex; flex-direction:column; gap:4px; }
   .tile:hover, .tile.open { box-shadow:0 1px 4px #0002; } .tile.open { background:#fff; }
-  .tile.sel { outline:2px solid var(--sel); } .tile.hit { outline:2px solid var(--usedby); }
+  .tile.sel { outline:2px solid var(--sel); } .tile.hit, .tile.usedby { outline:2px solid var(--usedby); } .tile.use { outline:2px solid var(--use); }
+  .tile .file { overflow:hidden; text-overflow:ellipsis; }
   .tile .top { display:flex; align-items:center; font-weight:600; line-height:1.2; white-space:nowrap; }
   .tile .file { color:var(--dim); font-size:11px; white-space:nowrap; margin-top:2px; }
   .tile .foot { display:flex; align-items:center; gap:6px; color:var(--dim); font-size:11px; margin-top:auto; }
@@ -81,6 +82,7 @@ modeEl.hidden = modeEl.options.length < 2;
 modeEl.onchange = () => draw(modeEl.value);
 // Group the files into titled sections: by folder, or by feature when a features file was given.
 function draw(mode) {
+  selectedPath = null;
   if (mode === "tree") return drawTree();
   if (mode === "deps") return drawDeps();
   if (mode === "entities") return drawEntities();
@@ -92,22 +94,21 @@ function draw(mode) {
   }
   roomsEl.replaceChildren(); cards = new Map();
   const keys = [...groups.keys()].sort((a, b) => (a === UNASSIGNED) - (b === UNASSIGNED) || (mode === "feature" ? FEATURES.findIndex(x => x.name === a) - FEATURES.findIndex(x => x.name === b) : 0));
+  roomsEl.append(mk("div", "sub", `${keys.length} ${mode === "feature" ? "features" : "folders"}. Click a file to see what it uses (green) and what uses it (blue).`));
+  const list = mk("div", "roots");
   for (const key of keys) {
-    const label = mode === "feature" ? featureInfo.get(key) : NAMES[key];
-    const h = document.createElement("h2");
-    h.textContent = label ? (mode === "feature" ? `${label.name} (${groups.get(key).length} files)` : `${label.name} (${key})`) : key;
-    roomsEl.append(h);
-    if (label) { const p = document.createElement("div"); p.className = "purpose"; p.textContent = label.purpose; roomsEl.append(p); }
-    const grid = document.createElement("div"); grid.className = "room";
-    for (const f of groups.get(key)) {
-      const c = document.createElement("div"); c.className = "card";
-      c.innerHTML = `<b></b><small></small>`;
-      c.firstChild.textContent = mode === "feature" ? f.path : f.path.split("/").pop();
-      c.lastChild.textContent = f.types.map(t => t.name).join(", ") || "no types";
-      c.onclick = () => select(f.path); cards.set(f.path, c); grid.append(c);
+    const label = mode === "feature" ? featureInfo.get(key) : NAMES[key], gfiles = groups.get(key);
+    const title = label ? (mode === "feature" ? label.name : `${label.name} (${key})`) : key;
+    const meta = label ? label.purpose : mode === "feature" ? "" : key;
+    const card = mk("div", "rootcard", `<div class="rhead">${mode === "feature" ? dot(gfiles[0]) : ""}<span class="name">${esc(title)}</span><span class="rcount">${gfiles.length} files</span></div><div class="rmeta">${esc(meta)}</div>`);
+    const grid = mk("div", "coll");
+    for (const f of gfiles) {
+      const c = mk("div", "tile", `<div class="top">${dot(f)}${esc(f.path.split("/").pop())}</div><div class="foot"><span>${f.types.length} types</span></div><div class="file">${esc(f.types.map(t => t.name).join(", ") || "no types")}</div>`);
+      c.title = f.path; c.onclick = () => selectedPath === f.path ? deselect() : select(f.path); cards.set(f.path, c); grid.append(c);
     }
-    roomsEl.append(grid);
+    card.append(grid); list.append(card);
   }
+  roomsEl.append(list);
   document.getElementById("q").oninput();
 }
 // Reducer tree. Reducers nobody includes are the roots, one card per row. Their children are tiles
@@ -328,9 +329,19 @@ function filterDeps(q) {
     if (c.nextElementSibling?.classList.contains("subcoll")) c.nextElementSibling.classList.toggle("hide", hide);
   }
 }
+// Click the selected file again, or press Escape, to clear the selection.
+let selectedPath = null;
+const SIDE_HINT = document.getElementById("side").innerHTML;
+function deselect() {
+  selectedPath = null;
+  for (const c of cards.values()) c.className = "tile";
+  document.getElementById("side").innerHTML = SIDE_HINT;
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape" && selectedPath) deselect(); });
 function select(path) {
+  selectedPath = path;
   for (const [p, c] of cards) {
-    c.className = "card" + (p === path ? " sel" : uses.get(path).has(p) ? " use" : usedBy.get(path).has(p) ? " usedby" : " dim");
+    c.className = "tile" + (p === path ? " sel" : uses.get(path).has(p) ? " use" : usedBy.get(path).has(p) ? " usedby" : " dim");
   }
   const f = files.find(x => x.path === path), side = document.getElementById("side");
   const list = set => [...set].sort().map(p => `<li><a data-p="${esc(p)}">${esc(p)}</a></li>`).join("") || "<li><code>none</code></li>";
@@ -344,7 +355,8 @@ document.getElementById("q").oninput = () => {
   const q = document.getElementById("q").value.toLowerCase();
   if (modeEl.value === "tree") return filterTree(q);
   if (modeEl.value === "deps" || modeEl.value === "entities") return filterDeps(q);
-  for (const f of files) cards.get(f.path)?.classList.toggle("hide", q && !(f.path + " " + (NAMES[roomOf(f.path)]?.name ?? "") + " " + (FEATURE_OF[f.path] ?? "") + " " + f.types.map(t => t.name).join(" ")).toLowerCase().includes(q));
+  for (const f of files) cards.get(f.path)?.classList.toggle("hide", !!q && !(f.path + " " + (NAMES[roomOf(f.path)]?.name ?? "") + " " + (FEATURE_OF[f.path] ?? "") + " " + f.types.map(t => t.name).join(" ")).toLowerCase().includes(q));
+  for (const card of document.querySelectorAll(".rootcard")) card.classList.toggle("hide", !card.querySelector(".tile:not(.hide)"));
 };
 draw("folder");
 </script></body></html>
