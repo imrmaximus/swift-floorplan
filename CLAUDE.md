@@ -3,8 +3,8 @@
 ## Goal
 A local developer tool (not an app) that reads a Swift/iOS codebase and produces an interactive,
 plain-English map of it. It ports the idea of Floorplan (https://github.com/haydenschmitty/floorplan, MIT),
-which only supports web stacks. First real target: a private TCA + SwiftUI app
-(~1148 Swift files, TCA + SwiftUI + Core Data + EventKit). That repo is read-only for us: never modify it.
+which only supports web stacks. First real target: a private TCA + SwiftUI + Core Data + EventKit app (~1148 Swift files,
+its path is in STATUS.md, which stays local). That repo is read-only for us: never modify it.
 
 ## Target
 Swift 6, macOS 14+, Swift Package Manager, SwiftSyntax for parsing. Tests use Swift Testing.
