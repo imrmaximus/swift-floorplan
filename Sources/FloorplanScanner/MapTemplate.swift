@@ -45,7 +45,7 @@ let mapTemplate = #"""
 </style></head>
 <body>
 <main><h1>swift-floorplan</h1><div class="sub" id="sub"></div>
-  <div class="bar"><input id="q" placeholder="Filter by file, folder, feature or type name"><select id="mode"><option value="folder">Group by folder</option><option value="feature">Group by feature</option><option value="tree">Reducer tree</option><option value="deps">Dependencies</option></select></div><div id="rooms"></div></main>
+  <div class="bar"><input id="q" placeholder="Filter by file, folder, feature or type name"><select id="mode"><option value="folder">Group by folder</option><option value="feature">Group by feature</option><option value="tree">Reducer tree</option><option value="deps">Dependencies</option><option value="entities">Core Data</option></select></div><div id="rooms"></div></main>
 <aside id="side"><div class="sub">Click a file card. Green = files it uses. Blue = files that use it.</div></aside>
 <script>
 const DATA = __SCAN_DATA__;
@@ -83,6 +83,7 @@ modeEl.onchange = () => draw(modeEl.value);
 function draw(mode) {
   if (mode === "tree") return drawTree();
   if (mode === "deps") return drawDeps();
+  if (mode === "entities") return drawEntities();
   const groups = new Map();
   for (const f of files) {
     const key = mode === "feature" ? (FEATURE_OF[f.path] ?? UNASSIGNED) : roomOf(f.path);
@@ -216,6 +217,7 @@ for (const f of files) for (const t of f.types) {
   }
   if (t.inherits.some(i => COREDATA.test(i))) recordNames.add(n);
 }
+if (!recordNames.size) modeEl.querySelector("[value=entities]").remove();
 const usesCoreData = t => t.references.some(r => COREDATA.test(r) || recordNames.has(r));
 // A name declared twice (State, Action...) is ambiguous and is skipped; a struct plus its extensions is one type.
 const reachesCoreData = t => usesCoreData(t) || t.references.some(r => { const e = typeIndex.get(r); return e?.declared === 1 && e.parts.some(usesCoreData); });
@@ -243,6 +245,44 @@ function frameworksOf(key, d) {
   for (const { t } of named) for (const r of t.references) if (PREFIX_FRAMEWORK[r.slice(0, 2)] && /[A-Z]/.test(r[2] ?? "")) kits.add(PREFIX_FRAMEWORK[r.slice(0, 2)]);
   if (touchesCoreData(key)) kits.add("CoreData");
   return [...kits].sort();
+}
+// Core Data view. One card per record class (a subclass of NSManagedObject). It lists the types that mention the record,
+// and the dependencies whose own client type does (types named after it, plus one hop through uniquely declared types).
+const recordUsers = new Map([...recordNames].map(n => [n, []])), recordDeps = new Map([...recordNames].map(n => [n, new Set()]));
+for (const f of files) for (const t of f.types) {
+  if (isTest(f.path, t.name)) continue;
+  const own = t.name.split(".")[0].replace(" (extension)", "");
+  for (const r of t.references) if (recordNames.has(r) && r !== own) recordUsers.get(r).push({ name: t.name, path: f.path });
+}
+for (const [key, d] of depDecl) for (const { t } of relatedOf(d).named) for (const r of t.references) {
+  recordDeps.get(r)?.add(key);
+  const e = typeIndex.get(r);
+  if (e?.declared === 1) for (const p of e.parts) for (const r2 of p.references) recordDeps.get(r2)?.add(key);
+}
+function entityCard(name) {
+  const users = recordUsers.get(name), deps = [...recordDeps.get(name)].sort();
+  const card = mk("div", "tile depcard", `<div class="top">${esc(name)}</div><div class="foot"><span>${deps.length} dependencies</span><span class="more">${users.length} ›</span></div><div class="file">${esc(deps.slice(0, 3).join(" · "))}${deps.length > 3 ? " …" : ""}</div>`);
+  card.dataset.text = [name, ...deps, ...users.map(u => u.name)].join(" ").toLowerCase();
+  card.onclick = () => {
+    const next = card.nextElementSibling;
+    if (next?.classList.contains("subcoll")) { next.remove(); card.classList.remove("open"); return; }
+    card.classList.add("open");
+    const sub = mk("div", "subcoll", `<div class="label">${esc(name)} is read or written by ${users.length} types · dependencies: ${esc(deps.join(", ") || "none")}</div>`), grid = mk("div", "coll");
+    for (const u of users) {
+      const t = mk("div", "tile", `<div class="top">${dot(u)}${esc(u.name)}</div><div class="file">${esc(u.path.split("/").pop())}</div>`);
+      t.onclick = e => { e.stopPropagation(); select(u.path); };
+      grid.append(t);
+    }
+    sub.append(grid); card.after(sub);
+  };
+  return card;
+}
+function drawEntities() {
+  roomsEl.replaceChildren(); cards = new Map();
+  const names = [...recordNames].sort((a, b) => recordUsers.get(b).length - recordUsers.get(a).length);
+  roomsEl.append(mk("div", "sub", `${names.length} record classes. Click a card to list the types that mention it. Filter by record, dependency or type name.`));
+  const grid = mk("div", "coll"); names.forEach(n => grid.append(entityCard(n))); roomsEl.append(grid);
+  document.getElementById("q").oninput();
 }
 function depCard(key) {
   const users = depUsers.get(key), d = depDecl.get(key), kits = d ? frameworksOf(key, d) : [];
@@ -298,7 +338,7 @@ function esc(s) { return s.replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;"
 document.getElementById("q").oninput = () => {
   const q = document.getElementById("q").value.toLowerCase();
   if (modeEl.value === "tree") return filterTree(q);
-  if (modeEl.value === "deps") return filterDeps(q);
+  if (modeEl.value === "deps" || modeEl.value === "entities") return filterDeps(q);
   for (const f of files) cards.get(f.path)?.classList.toggle("hide", q && !(f.path + " " + (NAMES[roomOf(f.path)]?.name ?? "") + " " + (FEATURE_OF[f.path] ?? "") + " " + f.types.map(t => t.name).join(" ")).toLowerCase().includes(q));
 };
 draw("folder");

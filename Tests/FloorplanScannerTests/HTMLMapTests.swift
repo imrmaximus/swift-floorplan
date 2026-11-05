@@ -52,6 +52,19 @@ import Testing
     }
 }
 
+@Suite struct EntityPageTests {
+    @Test func pageHasACoreDataViewListingRecordClasses() throws {
+        let record = scanSource("class TaskRecord: NSManagedObject {}", path: "TaskRecord.swift")
+        let user = scanSource("struct Home { let r: TaskRecord }", path: "Home.swift")
+        let html = try renderHTML(ScanResult(root: "/tmp/x", files: [record, user]))
+        #expect(html.contains("value=\"entities\""))
+        #expect(html.contains("function drawEntities"))
+        #expect(html.contains("\"NSManagedObject\""))
+        // A dependency is credited through its own client type, not through every type in its files.
+        #expect(html.contains("relatedOf(d).named"))
+    }
+}
+
 @Suite struct RoomNamesTests {
     private let scan = ScanResult(root: "/tmp/x", files: [scanSource("struct A {}", path: "Features/Inbox/A.swift")])
 
