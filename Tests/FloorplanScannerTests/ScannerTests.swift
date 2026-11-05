@@ -135,3 +135,49 @@ import Testing
         #expect(files[0]["imports"] as? [String] == ["SwiftUI"])
     }
 }
+
+@Suite struct ExtensionScanTests {
+    @Test func anExtensionBecomesItsOwnEntryWithItsReferences() throws {
+        let file = scanSource("""
+        struct NoteClient {}
+        extension NoteClient: DependencyKey {
+            static var liveValue: NoteClient { NoteRepository(context: NSManagedObjectContext()) }
+        }
+        """, path: "NoteClient.swift")
+        let ext = try #require(file.types.first { $0.name == "NoteClient (extension)" })
+        #expect(ext.kind == .extension)
+        #expect(ext.inherits == ["DependencyKey"])
+        #expect(ext.references.contains("NoteRepository"))
+        #expect(ext.references.contains("NSManagedObjectContext"))
+        #expect(file.types.first { $0.name == "NoteClient" }?.references == [])
+    }
+
+    @Test func typesNestedInAnExtensionKeepTheirPlainName() {
+        // Reducer bodies refer to them without the parent name (`ColumnSync()`), so the link must match that.
+        let file = scanSource("extension Feature { struct Helper {} }", path: "F.swift")
+        #expect(file.types.map(\.name) == ["Feature (extension)", "Helper"])
+    }
+
+    @Test func anExtensionIsNeverAReducerAndDependencyValuesIsSkipped() {
+        let file = scanSource("extension Feature: Reducer {}\nextension DependencyValues { var a: A { get set } }", path: "F.swift")
+        #expect(file.types.map(\.name) == ["Feature (extension)"])
+        #expect(file.types.allSatisfy { !$0.isReducer })
+    }
+}
+
+@Suite struct TopLevelCodeScanTests {
+    @Test func referencesInFreeFunctionsAreKeptOnATopLevelEntry() throws {
+        let file = scanSource("""
+        struct A {}
+        private func openStore() -> HabitStore { HabitStore(context: NSManagedObjectContext()) }
+        """, path: "A.swift")
+        let top = try #require(file.types.first { $0.name == "(top level code)" })
+        #expect(top.kind == .topLevel)
+        #expect(top.references.contains("HabitStore"))
+        #expect(top.references.contains("NSManagedObjectContext"))
+    }
+
+    @Test func noTopLevelEntryWhenThereIsNoTopLevelCode() {
+        #expect(scanSource("struct A { var b: B }", path: "A.swift").types.map(\.name) == ["A"])
+    }
+}

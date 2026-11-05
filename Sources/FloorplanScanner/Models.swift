@@ -2,6 +2,10 @@ import Foundation
 
 public enum TypeKind: String, Codable, Sendable {
     case `struct`, `class`, `enum`, `protocol`, actor
+    /// An `extension Foo { ... }` block, listed as "Foo (extension)" so its code is not lost.
+    case `extension`
+    /// Code outside any type (free functions, globals, previews), listed once per file as "(top level code)".
+    case topLevel
 }
 
 /// How a reducer includes a child reducer.

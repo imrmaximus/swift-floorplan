@@ -148,7 +148,7 @@ import Testing
 
 @Suite struct StoreCreationTests {
     private func creates(_ source: String) -> [[String]] {
-        scanSource(source, path: "A.swift").types.map(\.createsStores)
+        scanSource(source, path: "A.swift").types.filter { $0.kind != .topLevel }.map(\.createsStores)
     }
 
     @Test func recordsAReducerThatAViewBuildsAStoreFor() {

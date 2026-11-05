@@ -202,17 +202,46 @@ for (const f of files) {
   }
 }
 if (!depUsers.size) modeEl.querySelector("[value=deps]").remove();
-// Frameworks of a dependency: imports of the file that declares it, the file that defines its type, and the files of
-// types named after it (LiveReminderClient for ReminderClient), plus framework names seen in those types.
-function frameworksOf(d) {
-  const named = files.flatMap(f => f.types.filter(t => t.name.split(".")[0].includes(d.type) && !/Tests?$/.test(t.name)).map(t => ({ path: f.path, t })));
+// Core Data is shown only when the code uses its types, because most files import it out of habit. A type counts when
+// it mentions NSManagedObject and friends, or a record class (a subclass of NSManagedObject). One hop is followed, so a
+// client that goes through a repository still counts; two hops would reach nearly everything.
+const COREDATA = /^(NSManagedObject|NSFetchRequest|NSPersistent|NSFetchedResults|NSBatch|NSEntityDescription)/;
+const isTest = (path, name) => /Tests?\//.test(path) || /Tests?$/.test(name);
+const typeIndex = new Map(), recordNames = new Set();
+for (const f of files) for (const t of f.types) {
+  const n = t.name.split(".").pop().replace(" (extension)", "");
+  if (!isTest(f.path, t.name)) { if (!typeIndex.has(n)) typeIndex.set(n, []); typeIndex.get(n).push(t); }
+  if (t.inherits.some(i => COREDATA.test(i))) recordNames.add(n);
+}
+const usesCoreData = t => t.references.some(r => COREDATA.test(r) || recordNames.has(r));
+const reachesCoreData = t => usesCoreData(t) || t.references.some(r => { const l = typeIndex.get(r); return l?.length === 1 && usesCoreData(l[0]); });
+// The files that make up a dependency: where its key is declared, where its type is defined, and where types named
+// after it live (LiveReminderClient for ReminderClient). Test types are left out.
+function relatedOf(d) {
+  const named = files.flatMap(f => f.types.filter(t => t.name.split(".")[0].includes(d.type) && !isTest(f.path, t.name)).map(t => ({ path: f.path, t })));
   const paths = new Set([d.path, ...(definers.get(d.type) ?? []), ...named.map(n => n.path)]);
-  const kits = new Set(files.filter(f => paths.has(f.path)).flatMap(f => f.imports).filter(m => !BORING.has(m)));
+  return { named, sameFiles: files.filter(f => paths.has(f.path)) };
+}
+// A dependency touches Core Data when its code does, or when it reads another dependency that does.
+const coreDataMemo = new Map();
+function touchesCoreData(key) {
+  if (coreDataMemo.has(key)) return coreDataMemo.get(key);
+  coreDataMemo.set(key, false); // stops loops between dependencies
+  const d = depDecl.get(key);
+  const yes = !!d && relatedOf(d).sameFiles.some(f => f.types.some(t => reachesCoreData(t) || (t.dependencies ?? []).some(touchesCoreData)));
+  coreDataMemo.set(key, yes);
+  return yes;
+}
+// Frameworks of a dependency: imports of its files, plus framework names seen in the types named after it.
+function frameworksOf(key, d) {
+  const { named, sameFiles } = relatedOf(d);
+  const kits = new Set(sameFiles.flatMap(f => f.imports).filter(m => !BORING.has(m) && m !== "CoreData"));
   for (const { t } of named) for (const r of t.references) if (PREFIX_FRAMEWORK[r.slice(0, 2)] && /[A-Z]/.test(r[2] ?? "")) kits.add(PREFIX_FRAMEWORK[r.slice(0, 2)]);
+  if (touchesCoreData(key)) kits.add("CoreData");
   return [...kits].sort();
 }
 function depCard(key) {
-  const users = depUsers.get(key), d = depDecl.get(key), kits = d ? frameworksOf(d) : [];
+  const users = depUsers.get(key), d = depDecl.get(key), kits = d ? frameworksOf(key, d) : [];
   const card = mk("div", "tile depcard", `<div class="top">${esc(key)}</div><div class="foot"><span>${esc(d ? d.type : "from a library")}</span><span class="more">${users.length} ›</span></div><div class="file">${esc(d ? kits.join(" · ") || "no framework" : "")}</div>`);
   card.dataset.text = [key, d?.type, ...kits, ...users.map(u => u.name)].join(" ").toLowerCase();
   card.onclick = () => {
@@ -241,9 +270,11 @@ function drawDeps() {
   }
   document.getElementById("q").oninput();
 }
+// A leading "!" inverts the filter: "!coredata" lists the dependencies that do not touch Core Data.
 function filterDeps(q) {
+  const not = q.startsWith("!"), word = not ? q.slice(1) : q;
   for (const c of document.querySelectorAll(".depcard")) {
-    const hide = !!q && !c.dataset.text.includes(q);
+    const hide = !!word && c.dataset.text.includes(word) === not;
     c.classList.toggle("hide", hide);
     if (c.nextElementSibling?.classList.contains("subcoll")) c.nextElementSibling.classList.toggle("hide", hide);
   }

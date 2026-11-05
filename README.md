@@ -8,7 +8,7 @@ Everything runs on your machine. The map is a single static HTML page with the d
 - **File cards** grouped by folder or by feature. Click a card to see the types inside, the files it uses and the files that use it.
 - **Names and purposes** for folders and features, in plain English.
 - **Reducer tree** for [TCA](https://github.com/pointfreeco/swift-composable-architecture) apps: root reducers as cards, child reducers as tiles colored by how they are included (scope, ifLet, forEach, body, enumCase), plus the view that creates each root store.
-- **Dependencies view** for TCA apps: every `@Dependency(\.name)` as a card with its type, the frameworks its file imports (EventKit, CoreData...) and the types that use it. Filter by "eventkit" to see what touches the calendar.
+- **Dependencies view** for TCA apps: every `@Dependency(\.name)` as a card with its type, the frameworks its file imports (EventKit, CoreData...) and the types that use it. Filter by "eventkit" to see what touches the calendar, or `!coredata` to see what does not touch the database.
 - A filter box that works in every view.
 
 ## Requirements
